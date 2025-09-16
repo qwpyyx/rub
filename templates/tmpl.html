@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SZU Rub Badminton</title>
+</head>
+
+<body>
+    <a href="add" style="display: inline-block; margin-top: 1rem">add login information</a>
+    <a href="stop" style="display: inline-block; margin-top: 1rem;">stop the current goroutine</a>
+    <h1>预约信息</h1>
+    <label for="userSelect">Choose a User:</label>
+    <select name="userSelect" id="userSelect" onchange="onSelectFunction()">
+        <option value="">Please choose an option if needed</option>
+        {{range $i, $v := .UserInfo}}
+        <option value="{{$v.UserName}}-{{$v.UserId}}-{{$v.Password}}">{{$v.UserName}}</option>
+        {{end}}
+    </select>
+    <br />
+    <br />
+    {{ if .Message }}
+    <h1>预约结果: {{ .Message }}</h1>
+    {{ end }}
+    <form method="POST">
+        <label>姓名:</label>
+        <input type="text" id="user_name" name="user_name" required><br /><br />
+        <label>学号:</label>
+        <input type="text" id="user_id" name="user_id" required><br /><br />
+        <label>密码:</label>
+        <input type="password" id="password" name="password" required><br /><br />
+        <label for="sportDate">预约日期:</label>
+        <input type="date" id="sportDate" name="sportDate" value="2023-09-17" min="2023-09-17"
+            max="2025-07-01" /><br /><br />
+        <label for="firstTime">第一个场次时间:</label>
+        <input type="time" id="firstTime" name="firstTime" value="20:00" step="3600" required /><br /><br />
+        <label for="secondTime">第二个场次时间 (如果不需要预约第二个场就不用填):</label>
+        <input type="time" id="secondTime" name="secondTime" value="00:00" step="3600" required /><br /><br />
+        <div>
+            <input type="checkbox" id="ifExecuteNow" name="ifExecuteNow" value="1" />
+            <label for="ifExecuteNow">现在执行预约?</label>
+        </div>
+        <br />
+        <input type="submit">
+    </form>
+</body>
+<script>
+
+    function onSelectFunction(event) {
+        let $select = document.getElementById("userSelect");
+        let $userName = document.getElementById("user_name");
+        let $userId = document.getElementById("user_id");
+        let $password = document.getElementById("password");
+        if ($select.value != "") {
+            // console.log($select.value);
+            const array = $select.value.split("-");
+            $userName.value = array[0];
+            $userId.value = array[1];
+            $password.value = array[2];
+        } else {
+            $userName.value = "";
+            $userId.value = "";
+            $password.value = "";
+        }
+    }
+
+    Object.defineProperty(HTMLFormElement.prototype, 'formdata', {
+        get() {
+            return new FormData(this);
+        }
+    })
+</script>
+
+</html>

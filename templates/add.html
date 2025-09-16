@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SZU Rub Badminton</title>
+</head>
+
+<body>
+    <a href="/">back to the main page</a>
+
+    <h1>新增用户信息</h1>
+    <form method="POST" id="form">
+        <label>姓名:</label>
+        <input type="text" name="user_name" required><br />
+        <label>学号:</label>
+        <input type="text" name="user_id" required><br />
+        <label>密码:</label>
+        <input type="password" name="password" required><br />
+        <input type="submit" value="新增" />
+    </form>
+
+
+    {{ if .ErrorHave }}
+    Already have this user!
+    {{end}}
+    {{ if .Already }}
+    <h1>已有用户信息</h1>
+    {{range $i, $v := .Already}}
+    <h1>{{$v.UserName}}</h1>
+    {{end}}
+    {{ else }}
+    <h1>暂无用户信息</h1>
+    {{ end }}
+</body>
+
+</html>

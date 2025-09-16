@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SZU Rub Badminton</title>
+</head>
+
+<body>
+    <a href="/">back to the main page</a>
+
+    {{ if .Infos }}
+    <h1>正在运行的协程：</h1>
+    {{range $i, $v := .Infos}}
+    <div>
+        <span>{{$v.UserName}}</span>
+        <span>{{$v.UserId}}</span>
+        <span>{{$v.ReservationDate}}</span>
+        <span>{{$v.FirstReservationTime}}</span>
+        <span>{{$v.SecondReservationTime}}</span>
+        <form method="POST" id="form">
+            <input type="text" style="display: none;" name="identification" value="{{$v.Identification}}"><br />
+            <input type="text" style="display: none;" name="user_id" value="{{$v.UserId}}"><br />
+            <input type="submit" value="删除" />
+        </form>
+    </div>
+    {{end}}
+    {{ else }}
+    <h1>暂无正在运行的协程</h1>
+    {{ end }}
+</body>
+<script>
+
+</script>
+
+</html>
