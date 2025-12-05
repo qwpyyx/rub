@@ -14,7 +14,7 @@
     <select name="userSelect" id="userSelect" onchange="onSelectFunction()">
         <option value="">Please choose an option if needed</option>
         {{range $i, $v := .UserInfo}}
-        <option value="{{$v.UserName}}-{{$v.UserId}}-{{$v.Password}}">{{$v.UserName}}</option>
+        <option value="{{$v.UserName}}-{{$v.UserId}}-{{$v.Password}}-{{$v.PhoneNumber}}">{{$v.UserName}}</option>
         {{end}}
     </select>
     <br />
@@ -22,6 +22,24 @@
     {{ if .Message }}
     <h1>预约结果: {{ .Message }}</h1>
     {{ end }}
+    {{ if eq .ConfigMessage "saved" }}
+    <h2 style="color: green;">短信配置已保存，可直接使用 main.exe</h2>
+    {{ end }}
+    <h2>短信提醒配置 (Aliyun SMS)</h2>
+    <form method="POST" action="/config" style="margin-bottom: 2rem;">
+        <label>AccessKey ID:</label>
+        <input type="text" name="sms_access_key_id" value="{{ if .Config }}{{ .Config.AccessKeyID }}{{ end }}" required><br /><br />
+        <label>AccessKey Secret:</label>
+        <input type="password" name="sms_access_key_secret" value="{{ if .Config }}{{ .Config.AccessKeySecret }}{{ end }}" required><br /><br />
+        <label>短信签名 (SignName):</label>
+        <input type="text" name="sms_sign_name" value="{{ if .Config }}{{ .Config.SignName }}{{ end }}" required><br /><br />
+        <label>短信模板编码 (TemplateCode):</label>
+        <input type="text" name="sms_template_code" value="{{ if .Config }}{{ .Config.TemplateCode }}{{ end }}" required><br /><br />
+        <label>区域 ID (默认 cn-hangzhou):</label>
+        <input type="text" name="sms_region_id" value="{{ if .Config }}{{ .Config.RegionID }}{{ end }}" placeholder="cn-hangzhou"><br /><br />
+        <small>请先在阿里云短信控制台开通服务、创建签名和模板，然后把对应的 Key、签名、模板编码填在这里并保存。</small><br /><br />
+        <input type="submit" value="保存短信配置" />
+    </form>
     <form method="POST">
         <label>姓名:</label>
         <input type="text" id="user_name" name="user_name" required><br /><br />
@@ -29,6 +47,8 @@
         <input type="text" id="user_id" name="user_id" required><br /><br />
         <label>密码:</label>
         <input type="password" id="password" name="password" required><br /><br />
+        <label>手机号:</label>
+        <input type="tel" id="phone_number" name="phone_number" placeholder="11位手机号" required><br /><br />
         <label for="sportDate">预约日期:</label>
         <input type="date" id="sportDate" name="sportDate" value="2023-09-17" min="2023-09-17"
             max="2025-07-01" /><br /><br />
@@ -51,16 +71,19 @@
         let $userName = document.getElementById("user_name");
         let $userId = document.getElementById("user_id");
         let $password = document.getElementById("password");
+        let $phone = document.getElementById("phone_number");
         if ($select.value != "") {
             // console.log($select.value);
             const array = $select.value.split("-");
             $userName.value = array[0];
             $userId.value = array[1];
             $password.value = array[2];
+            $phone.value = array[3];
         } else {
             $userName.value = "";
             $userId.value = "";
             $password.value = "";
+            $phone.value = "";
         }
     }
 

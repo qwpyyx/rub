@@ -15,6 +15,9 @@ import (
 	"sync"
 	"time"
 
+	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
+	dysmsapi "github.com/alibabacloud-go/dysmsapi-20170525/v3/client"
+	"github.com/alibabacloud-go/tea/tea"
 	"github.com/gocolly/colly/v2"
 	"github.com/gocolly/colly/v2/debug"
 
@@ -79,6 +82,7 @@ type UserInfo struct {
 	UserId       string
 	UserName     string
 	Password     string
+	PhoneNumber  string
 	SportDate    string
 	FirstTime    string
 	SecondTime   string
@@ -87,6 +91,14 @@ type UserInfo struct {
 	MOD_AUTH_CAS string
 	firstRound   bool
 	secondRound  bool
+}
+
+type SMSConfig struct {
+	AccessKeyID     string `json:"accessKeyId"`
+	AccessKeySecret string `json:"accessKeySecret"`
+	SignName        string `json:"signName"`
+	TemplateCode    string `json:"templateCode"`
+	RegionID        string `json:"regionId"`
 }
 
 type GoroutineInfo struct {
@@ -106,12 +118,67 @@ type GoroutineInfo struct {
 }
 
 var goroutines map[int]*GoroutineInfo
+var smsConfig *SMSConfig
 var addLock sync.Mutex
 var deleteLock sync.Mutex
 var deleteLock2 sync.Mutex
 var deleteChan chan bool = make(chan bool)
 var deletingFlag bool = false
 var idx int = 0
+
+func loadSMSConfigFromFile() (*SMSConfig, error) {
+	data, err := ioutil.ReadFile("sms_config.json")
+	if os.IsNotExist(err) {
+		return &SMSConfig{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg SMSConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+func saveSMSConfigToFile(cfg *SMSConfig) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile("sms_config.json", data, 0644)
+}
+
+func valueOrEnv(value, envKey string) string {
+	if value != "" {
+		return value
+	}
+
+	return os.Getenv(envKey)
+}
+
+func getActiveSMSConfig() *SMSConfig {
+	if smsConfig == nil {
+		cfg, err := loadSMSConfigFromFile()
+		if err != nil {
+			log.Printf("failed to load sms config: %v", err)
+			smsConfig = &SMSConfig{}
+		} else {
+			smsConfig = cfg
+		}
+	}
+
+	return &SMSConfig{
+		AccessKeyID:     valueOrEnv(smsConfig.AccessKeyID, "ALIYUN_SMS_ACCESS_KEY_ID"),
+		AccessKeySecret: valueOrEnv(smsConfig.AccessKeySecret, "ALIYUN_SMS_ACCESS_KEY_SECRET"),
+		SignName:        valueOrEnv(smsConfig.SignName, "ALIYUN_SMS_SIGN_NAME"),
+		TemplateCode:    valueOrEnv(smsConfig.TemplateCode, "ALIYUN_SMS_TEMPLATE_CODE"),
+		RegionID:        valueOrEnv(smsConfig.RegionID, "ALIYUN_SMS_REGION_ID"),
+	}
+}
 
 func getDHID(urls string, user *UserInfo) string {
 	// formValues := url.Values{}
@@ -279,7 +346,7 @@ func httpRequestDHID(urls string, dhID string, year int, month int, day int, sta
 		formValues.Set("YYRGH", user.UserId)
 		formValues.Set("CYRS", "")
 		formValues.Set("YYRXM", user.UserName)
-		formValues.Set("LXFS", "")
+		formValues.Set("LXFS", user.PhoneNumber)
 		formValues.Set("CGDM", "001")
 		// 场地ID, 不固定, 需要读取JSON文件
 		formValues.Set("CDWID", value.Id)
@@ -344,6 +411,48 @@ func httpRequestDHID(urls string, dhID string, year int, month int, day int, sta
 	}
 
 	return false
+}
+
+func sendSMSNotification(user *UserInfo, reservationTime string) error {
+	if user.PhoneNumber == "" {
+		return fmt.Errorf("phone number is empty for user %s", user.UserName)
+	}
+
+	activeConfig := getActiveSMSConfig()
+	accessKeyID := activeConfig.AccessKeyID
+	accessKeySecret := activeConfig.AccessKeySecret
+	signName := activeConfig.SignName
+	templateCode := activeConfig.TemplateCode
+	regionID := activeConfig.RegionID
+	if regionID == "" {
+		regionID = "cn-hangzhou"
+	}
+
+	if accessKeyID == "" || accessKeySecret == "" || signName == "" || templateCode == "" {
+		return fmt.Errorf("sms config is not complete")
+	}
+
+	config := &openapi.Config{
+		AccessKeyId:     tea.String(accessKeyID),
+		AccessKeySecret: tea.String(accessKeySecret),
+		RegionId:        tea.String(regionID),
+	}
+
+	smsClient, err := dysmsapi.NewClient(config)
+	if err != nil {
+		return err
+	}
+
+	messageParams := fmt.Sprintf(`{"name":"%s","date":"%s","time":"%s"}`, user.UserName, user.SportDate, reservationTime)
+	request := &dysmsapi.SendSmsRequest{
+		PhoneNumbers:  tea.String(user.PhoneNumber),
+		SignName:      tea.String(signName),
+		TemplateCode:  tea.String(templateCode),
+		TemplateParam: tea.String(messageParams),
+	}
+
+	_, err = smsClient.SendSms(request)
+	return err
 }
 
 func getOpeningRoom(CDWID string, year int, month int, day int, startTime string, endTime string, user *UserInfo) bool {
@@ -533,12 +642,21 @@ func execRub(user *UserInfo, goroutineID int) bool {
 	waitGroup := sync.WaitGroup{}
 	waitGroup.Add(2)
 
+	firstSMSent := false
+	secondSMSent := false
+
 	go func() {
 		for !user.firstRound {
 			success := httpRequestDHID("https://ehall.szu.edu.cn/qljfwapp/sys/lwSzuCgyy/sportVenue/insertVenueBookingInfo.do",
 				dhID, year, month, day, timeArr[0], endTime, user)
 			// return err
 			user.firstRound = success
+			if success && !firstSMSent {
+				if err := sendSMSNotification(user, user.FirstTime); err != nil {
+					log.Printf("send sms for first slot failed: %v", err)
+				}
+				firstSMSent = true
+			}
 			if !user.firstRound {
 				// 被通知需要关闭
 				if goroutines[goroutineID].FirstStatus {
@@ -561,6 +679,12 @@ func execRub(user *UserInfo, goroutineID int) bool {
 		success := httpRequestDHID("https://ehall.szu.edu.cn/qljfwapp/sys/lwSzuCgyy/sportVenue/insertVenueBookingInfo.do",
 			dhID2, year, month, day, timeArr2[0], endTime2, user)
 		user.secondRound = success
+		if success && !secondSMSent && user.SecondTime != "00:00" {
+			if err := sendSMSNotification(user, user.SecondTime); err != nil {
+				log.Printf("send sms for second slot failed: %v", err)
+			}
+			secondSMSent = true
+		}
 		if !success {
 			// 被通知需要关闭
 			if goroutines[goroutineID].SecondStatus {
@@ -623,24 +747,29 @@ func process(w http.ResponseWriter, r *http.Request) {
 	}
 	var usersDecode []*UserInfo
 	json.Unmarshal(dataEncoded, &usersDecode)
+	config := getActiveSMSConfig()
+	configMessage := r.URL.Query().Get("config")
 
 	if r.Method != http.MethodPost {
 		t.Execute(w, struct {
-			Result   bool
-			Message  string
-			UserInfo []*UserInfo
-		}{false, "", usersDecode})
+			Result        bool
+			Message       string
+			UserInfo      []*UserInfo
+			Config        *SMSConfig
+			ConfigMessage string
+		}{false, "", usersDecode, config, configMessage})
 		return
 	}
 
 	user := UserInfo{
-		UserId:     r.FormValue("user_id"),
-		UserName:   r.FormValue("user_name"),
-		Password:   r.FormValue("password"),
-		SportDate:  r.FormValue("sportDate"),
-		FirstTime:  r.FormValue("firstTime"),
-		SecondTime: r.FormValue("secondTime"),
-		IfExecNow:  r.FormValue("ifExecuteNow"),
+		UserId:      r.FormValue("user_id"),
+		UserName:    r.FormValue("user_name"),
+		Password:    r.FormValue("password"),
+		PhoneNumber: r.FormValue("phone_number"),
+		SportDate:   r.FormValue("sportDate"),
+		FirstTime:   r.FormValue("firstTime"),
+		SecondTime:  r.FormValue("secondTime"),
+		IfExecNow:   r.FormValue("ifExecuteNow"),
 	}
 
 	fmt.Println(user)
@@ -671,17 +800,47 @@ func process(w http.ResponseWriter, r *http.Request) {
 
 	if result {
 		t.Execute(w, struct {
-			Result   bool
-			Message  string
-			UserInfo []*UserInfo
-		}{result, "成功", usersDecode})
+			Result        bool
+			Message       string
+			UserInfo      []*UserInfo
+			Config        *SMSConfig
+			ConfigMessage string
+		}{result, "成功", usersDecode, config, configMessage})
 	} else {
 		t.Execute(w, struct {
-			Result   bool
-			Message  string
-			UserInfo []*UserInfo
-		}{result, "失败", usersDecode})
+			Result        bool
+			Message       string
+			UserInfo      []*UserInfo
+			Config        *SMSConfig
+			ConfigMessage string
+		}{result, "失败", usersDecode, config, configMessage})
 	}
+}
+
+func updateSMSConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	updated := &SMSConfig{
+		AccessKeyID:     strings.TrimSpace(r.FormValue("sms_access_key_id")),
+		AccessKeySecret: strings.TrimSpace(r.FormValue("sms_access_key_secret")),
+		SignName:        strings.TrimSpace(r.FormValue("sms_sign_name")),
+		TemplateCode:    strings.TrimSpace(r.FormValue("sms_template_code")),
+		RegionID:        strings.TrimSpace(r.FormValue("sms_region_id")),
+	}
+
+	smsConfig = updated
+	if updated.RegionID == "" {
+		smsConfig.RegionID = "cn-hangzhou"
+	}
+
+	if err := saveSMSConfigToFile(updated); err != nil {
+		log.Printf("failed to save sms config: %v", err)
+	}
+
+	http.Redirect(w, r, "/?config=saved", http.StatusSeeOther)
 }
 
 func add(w http.ResponseWriter, r *http.Request) {
@@ -715,9 +874,10 @@ func add(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(alreadyDataEncode, &alreadyUsersDecode)
 
 	newUser := UserInfo{
-		UserId:   r.FormValue("user_id"),
-		UserName: r.FormValue("user_name"),
-		Password: r.FormValue("password"),
+		UserId:      r.FormValue("user_id"),
+		UserName:    r.FormValue("user_name"),
+		Password:    r.FormValue("password"),
+		PhoneNumber: r.FormValue("phone_number"),
 	}
 
 	// when a link to /add, it will take a POST method, skip that
@@ -1023,6 +1183,7 @@ func main() {
 	}
 	http.HandleFunc("/", process)
 	http.HandleFunc("/add", add)
+	http.HandleFunc("/config", updateSMSConfig)
 	http.HandleFunc("/stop", stop)
 
 	log.Println("Listen at http://127.0.0.1:8080")
