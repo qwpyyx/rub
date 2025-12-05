@@ -14,7 +14,9 @@
     <select name="userSelect" id="userSelect" onchange="onSelectFunction()">
         <option value="">Please choose an option if needed</option>
         {{range $i, $v := .UserInfo}}
-        <option value="{{$v.UserName}}-{{$v.UserId}}-{{$v.Password}}-{{$v.PhoneNumber}}">{{$v.UserName}}</option>
+        <option value="{{$v.UserId}}" data-username="{{$v.UserName}}" data-userid="{{$v.UserId}}" data-password="{{$v.Password}}"
+            data-phone="{{$v.PhoneNumber}}" data-date="{{$v.SportDate}}" data-first="{{$v.FirstTime}}" data-second="{{$v.SecondTime}}"
+            {{if and $.FormUser (eq $v.UserId $.FormUser.UserId)}}selected{{end}}>{{$v.UserName}}</option>
         {{end}}
     </select>
     <br />
@@ -42,20 +44,20 @@
     </form>
     <form method="POST">
         <label>姓名:</label>
-        <input type="text" id="user_name" name="user_name" required><br /><br />
+        <input type="text" id="user_name" name="user_name" value="{{if .FormUser}}{{.FormUser.UserName}}{{end}}" required><br /><br />
         <label>学号:</label>
-        <input type="text" id="user_id" name="user_id" required><br /><br />
+        <input type="text" id="user_id" name="user_id" value="{{if .FormUser}}{{.FormUser.UserId}}{{end}}" required><br /><br />
         <label>密码:</label>
-        <input type="password" id="password" name="password" required><br /><br />
+        <input type="password" id="password" name="password" value="{{if .FormUser}}{{.FormUser.Password}}{{end}}" required><br /><br />
         <label>手机号:</label>
-        <input type="tel" id="phone_number" name="phone_number" placeholder="11位手机号" required><br /><br />
+        <input type="tel" id="phone_number" name="phone_number" value="{{if .FormUser}}{{.FormUser.PhoneNumber}}{{end}}" placeholder="11位手机号" required><br /><br />
         <label for="sportDate">预约日期:</label>
-        <input type="date" id="sportDate" name="sportDate" value="2023-09-17" min="2023-09-17"
+        <input type="date" id="sportDate" name="sportDate" value="{{if .FormUser}}{{.FormUser.SportDate}}{{else}}2023-09-17{{end}}" min="2023-09-17"
             max="2025-07-01" /><br /><br />
         <label for="firstTime">第一个场次时间:</label>
-        <input type="time" id="firstTime" name="firstTime" value="20:00" step="3600" required /><br /><br />
+        <input type="time" id="firstTime" name="firstTime" value="{{if .FormUser}}{{.FormUser.FirstTime}}{{else}}20:00{{end}}" step="3600" required /><br /><br />
         <label for="secondTime">第二个场次时间 (如果不需要预约第二个场就不用填):</label>
-        <input type="time" id="secondTime" name="secondTime" value="00:00" step="3600" required /><br /><br />
+        <input type="time" id="secondTime" name="secondTime" value="{{if .FormUser}}{{.FormUser.SecondTime}}{{else}}00:00{{end}}" step="3600" required /><br /><br />
         <div>
             <input type="checkbox" id="ifExecuteNow" name="ifExecuteNow" value="1" />
             <label for="ifExecuteNow">现在执行预约?</label>
@@ -72,18 +74,26 @@
         let $userId = document.getElementById("user_id");
         let $password = document.getElementById("password");
         let $phone = document.getElementById("phone_number");
+        let $date = document.getElementById("sportDate");
+        let $first = document.getElementById("firstTime");
+        let $second = document.getElementById("secondTime");
         if ($select.value != "") {
-            // console.log($select.value);
-            const array = $select.value.split("-");
-            $userName.value = array[0];
-            $userId.value = array[1];
-            $password.value = array[2];
-            $phone.value = array[3];
+            const option = $select.options[$select.selectedIndex];
+            $userName.value = option.dataset.username || "";
+            $userId.value = option.dataset.userid || "";
+            $password.value = option.dataset.password || "";
+            $phone.value = option.dataset.phone || "";
+            $date.value = option.dataset.date || $date.value;
+            $first.value = option.dataset.first || $first.value;
+            $second.value = option.dataset.second || $second.value;
         } else {
             $userName.value = "";
             $userId.value = "";
             $password.value = "";
             $phone.value = "";
+            $date.value = "";
+            $first.value = "";
+            $second.value = "";
         }
     }
 

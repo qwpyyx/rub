@@ -121,6 +121,37 @@ var goroutines map[int]*GoroutineInfo
 var smsConfig *SMSConfig
 var addLock sync.Mutex
 var deleteLock sync.Mutex
+
+func loadUsersFromFile() ([]*UserInfo, error) {
+	data, err := ioutil.ReadFile("users")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []*UserInfo{}, nil
+		}
+		return nil, err
+	}
+
+	var users []*UserInfo
+	if len(data) == 0 {
+		return []*UserInfo{}, nil
+	}
+
+	if err := json.Unmarshal(data, &users); err != nil {
+		return nil, err
+	}
+
+	return users, nil
+}
+
+func saveUsersToFile(users []*UserInfo) error {
+	data, err := json.Marshal(users)
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile("users", data, 0644)
+}
+
 var deleteLock2 sync.Mutex
 var deleteChan chan bool = make(chan bool)
 var deletingFlag bool = false
@@ -741,12 +772,11 @@ func callJavascript(password, salt string) string {
 func process(w http.ResponseWriter, r *http.Request) {
 	t := template.Must(template.ParseFiles("./templates/tmpl.html"))
 
-	dataEncoded, err := ioutil.ReadFile("users")
+	usersDecode, err := loadUsersFromFile()
 	if err != nil {
-		panic(err)
+		log.Printf("failed to load users: %v", err)
+		usersDecode = []*UserInfo{}
 	}
-	var usersDecode []*UserInfo
-	json.Unmarshal(dataEncoded, &usersDecode)
 	config := getActiveSMSConfig()
 	configMessage := r.URL.Query().Get("config")
 
@@ -757,7 +787,8 @@ func process(w http.ResponseWriter, r *http.Request) {
 			UserInfo      []*UserInfo
 			Config        *SMSConfig
 			ConfigMessage string
-		}{false, "", usersDecode, config, configMessage})
+			FormUser      *UserInfo
+		}{false, "", usersDecode, config, configMessage, nil})
 		return
 	}
 
@@ -798,6 +829,34 @@ func process(w http.ResponseWriter, r *http.Request) {
 		result = startRub(&user, tempId)
 	}
 
+	// persist latest filled information for future visits
+	if user.UserId != "" {
+		updatedUsers := []*UserInfo{}
+		found := false
+		for _, u := range usersDecode {
+			if u.UserId == user.UserId {
+				u.UserName = user.UserName
+				u.Password = user.Password
+				u.PhoneNumber = user.PhoneNumber
+				u.SportDate = user.SportDate
+				u.FirstTime = user.FirstTime
+				u.SecondTime = user.SecondTime
+				u.IfExecNow = user.IfExecNow
+				found = true
+			}
+			updatedUsers = append(updatedUsers, u)
+		}
+
+		if !found {
+			updatedUsers = append(updatedUsers, &user)
+		}
+
+		if err := saveUsersToFile(updatedUsers); err != nil {
+			log.Printf("failed to persist user info: %v", err)
+		}
+		usersDecode = updatedUsers
+	}
+
 	if result {
 		t.Execute(w, struct {
 			Result        bool
@@ -805,7 +864,8 @@ func process(w http.ResponseWriter, r *http.Request) {
 			UserInfo      []*UserInfo
 			Config        *SMSConfig
 			ConfigMessage string
-		}{result, "成功", usersDecode, config, configMessage})
+			FormUser      *UserInfo
+		}{result, "成功", usersDecode, config, configMessage, &user})
 	} else {
 		t.Execute(w, struct {
 			Result        bool
@@ -813,7 +873,8 @@ func process(w http.ResponseWriter, r *http.Request) {
 			UserInfo      []*UserInfo
 			Config        *SMSConfig
 			ConfigMessage string
-		}{result, "失败", usersDecode, config, configMessage})
+			FormUser      *UserInfo
+		}{result, "失败", usersDecode, config, configMessage, &user})
 	}
 }
 
@@ -847,12 +908,11 @@ func add(w http.ResponseWriter, r *http.Request) {
 	t := template.Must(template.ParseFiles("./templates/add.html"))
 
 	if r.Method != http.MethodPost {
-		dataEncoded, err := ioutil.ReadFile("users")
+		usersDecode, err := loadUsersFromFile()
 		if err != nil {
-			panic(err)
+			log.Printf("failed to load users: %v", err)
+			usersDecode = []*UserInfo{}
 		}
-		var usersDecode []*UserInfo
-		json.Unmarshal(dataEncoded, &usersDecode)
 		if len(usersDecode) == 0 {
 			log.Println("Users information are nil")
 			t.Execute(w, nil)
@@ -866,12 +926,11 @@ func add(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// get the already information
-	alreadyDataEncode, err := ioutil.ReadFile("users")
+	alreadyUsersDecode, err := loadUsersFromFile()
 	if err != nil {
-		panic(err)
+		log.Printf("failed to load users: %v", err)
+		alreadyUsersDecode = []*UserInfo{}
 	}
-	var alreadyUsersDecode []*UserInfo
-	json.Unmarshal(alreadyDataEncode, &alreadyUsersDecode)
 
 	newUser := UserInfo{
 		UserId:      r.FormValue("user_id"),
@@ -900,14 +959,8 @@ func add(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("newUser", newUser)
 
 	alreadyUsersDecode = append(alreadyUsersDecode, &newUser)
-	data, err := json.Marshal(alreadyUsersDecode)
-	if err != nil {
-		panic(err)
-	}
-	// add the new information to the file
-	err = ioutil.WriteFile("users", data, 0644)
-	if err != nil {
-		panic(err)
+	if err := saveUsersToFile(alreadyUsersDecode); err != nil {
+		log.Printf("failed to save users: %v", err)
 	}
 
 	t.Execute(w, struct {
